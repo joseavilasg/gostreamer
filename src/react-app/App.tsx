@@ -1,71 +1,28 @@
-// src/App.tsx
-
-import { useState } from 'react';
-import viteLogo from '/vite.svg';
-import cloudflareLogo from './assets/Cloudflare_Logo.svg';
-import honoLogo from './assets/hono.svg';
-import reactLogo from './assets/react.svg';
-import './App.css';
+import { MediaPlayer, MediaProvider, Poster } from '@vidstack/react';
+import {
+  PlyrLayout,
+  plyrLayoutIcons,
+} from '@vidstack/react/player/layouts/plyr';
 
 function App() {
-  const [count, setCount] = useState(0);
-  const [name, setName] = useState('unknown');
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" rel="noopener" target="_blank">
-          <img alt="Vite logo" className="logo" src={viteLogo} />
-        </a>
-        <a href="https://react.dev" rel="noopener" target="_blank">
-          <img alt="React logo" className="logo react" src={reactLogo} />
-        </a>
-        <a href="https://hono.dev/" rel="noopener" target="_blank">
-          <img alt="Hono logo" className="logo cloudflare" src={honoLogo} />
-        </a>
-        <a
-          href="https://workers.cloudflare.com/"
-          rel="noopener"
-          target="_blank"
-        >
-          <img
-            alt="Cloudflare logo"
-            className="logo cloudflare"
-            src={cloudflareLogo}
-          />
-        </a>
-      </div>
-      <h1>Vite + React + Hono + Cloudflare</h1>
-      <div className="card">
-        <button
-          aria-label="increment"
-          onClick={() => setCount((count) => count + 1)}
-          type="button"
-        >
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <div className="card">
-        <button
-          aria-label="get name"
-          onClick={() => {
-            fetch('/api/')
-              .then((res) => res.json() as Promise<{ name: string }>)
-              .then((data) => setName(data.name));
-          }}
-          type="button"
-        >
-          Name from API is: {name}
-        </button>
-        <p>
-          Edit <code>worker/index.ts</code> to change the name
-        </p>
-      </div>
-      <p className="read-the-docs">Click on the logos to learn more</p>
-    </>
+    <MediaPlayer
+      src="http://localhost:5173/server/stream.m3u8"
+      style={{ width: '100%', height: '100%' }}
+      title="The Muppet Show"
+    >
+      <MediaProvider>
+        <Poster
+          alt="The Muppet Show"
+          className="media-poster"
+          src="https://disney.images.edge.bamgrid.com/ripcut-delivery/v2/variant/disney/019be70d-36a5-7d2a-8d14-9022cc8859c3/compose?format=webp&width=1440"
+        />
+      </MediaProvider>
+      <PlyrLayout
+        icons={plyrLayoutIcons}
+        // thumbnails="https://files.vidstack.io/sprite-fight/thumbnails.vtt"
+      />
+    </MediaPlayer>
   );
 }
 
