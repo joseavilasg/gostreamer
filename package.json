@@ -12,7 +12,10 @@
     "publish": true
   },
   "dependencies": {
+    "@vidstack/react": "^1.12.13",
+    "hls.js": "^1.6.15",
     "hono": "4.11.1",
+    "mime": "^4.1.0",
     "react": "19.2.1",
     "react-dom": "19.2.1"
   },
