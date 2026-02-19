@@ -4,6 +4,170 @@ import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
 
+type StreamType = 'live' | 'on-demand' | 'unknown';
+
+const isValidPath = (path: string) => {
+  if (path.includes('..') || path.includes('//') || path.includes('\\')) {
+    return false;
+  }
+
+  return true;
+};
+
+const isValidServerHost = (serverHost: string) => {
+  return /^[\w\d.-]+:\d+$/.test(serverHost) || /^[\w\d.-]+$/.test(serverHost);
+};
+
+const isIpHost = (serverHost: string) => {
+  const host = serverHost.split(':')[0];
+  const isIPv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(host);
+  const isIPv6 = /^(?:\[[0-9a-fA-F:]+\]|[0-9a-fA-F:]+)$/.test(host);
+  return isIPv4 || isIPv6;
+};
+
+const buildUpstreamHeaders = (reqHeaders: Headers, targetUrl: string) => {
+  const headers = new Headers(reqHeaders);
+  try {
+    const parsedTarget = new URL(targetUrl);
+    headers.set('host', parsedTarget.host);
+  } catch (_) {
+    // ignore parse errors; fetch will fail later
+  }
+  headers.delete('cookie');
+  headers.delete('authorization');
+  headers.delete('x-forwarded-for');
+  headers.delete('x-real-ip');
+  return headers;
+};
+
+const parseMasterVariants = (manifest: string) => {
+  const lines = manifest.split(/\r?\n/).map((line) => line.trim());
+  const variants: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^#EXT-X-STREAM-INF/i.test(lines[i])) continue;
+
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const candidate = lines[j];
+      if (!candidate) continue;
+      if (candidate.startsWith('#')) continue;
+      variants.push(candidate);
+      i = j;
+      break;
+    }
+  }
+
+  return variants;
+};
+
+const detectTypeFromManifest = (manifest: string): StreamType | 'master' => {
+  const isMaster = /#EXT-X-STREAM-INF/i.test(manifest);
+  if (isMaster) return 'master';
+
+  const isVod =
+    /#EXT-X-PLAYLIST-TYPE:VOD/i.test(manifest) ||
+    /#EXT-X-ENDLIST/i.test(manifest);
+
+  return isVod ? 'on-demand' : 'live';
+};
+
+const detectHlsStreamType = async (
+  entryUrl: string,
+  reqHeaders: Headers,
+): Promise<StreamType> => {
+  const maxDepth = 3;
+  let currentUrl = entryUrl;
+  const baseHost = new URL(entryUrl).host;
+
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    const headers = buildUpstreamHeaders(reqHeaders, currentUrl);
+    headers.set(
+      'accept',
+      'application/vnd.apple.mpegurl, application/x-mpegURL, text/plain, */*',
+    );
+
+    const response = await fetch(currentUrl, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) return 'unknown';
+
+    const manifest = await response.text();
+    const detected = detectTypeFromManifest(manifest);
+    if (detected !== 'master') return detected;
+
+    const variants = parseMasterVariants(manifest);
+    if (variants.length === 0) return 'unknown';
+
+    const nextUrl = new URL(variants[0], currentUrl);
+    if (nextUrl.host !== baseHost) return 'unknown';
+    currentUrl = nextUrl.toString();
+  }
+
+  return 'unknown';
+};
+
+app.get('/server-type/*', async (c) => {
+  const SERVER_HOST = (c.env as Env).SERVER_HOST;
+  if (!SERVER_HOST) {
+    return c.json({ error: 'unknown host' }, 500);
+  }
+
+  const path = c.req.path.replace('/server-type', '');
+
+  if (!isValidPath(path)) {
+    return c.json({ error: 'Invalid path' }, 400);
+  }
+
+  if (!path.toLowerCase().endsWith('.m3u8')) {
+    return c.json({ error: 'not allowed' }, 403);
+  }
+
+  if (!isValidServerHost(SERVER_HOST)) {
+    return c.json({ error: 'invalid server configuration' }, 500);
+  }
+
+  if (isIpHost(SERVER_HOST)) {
+    return c.json(
+      {
+        error: 'server host must be a DNS hostname (not a literal IP address)',
+      },
+      400,
+    );
+  }
+
+  const queryString = new URL(c.req.url).search;
+  const targetUrl = `http://${SERVER_HOST}${path}${queryString}`;
+
+  try {
+    const origin = c.req.header('Origin');
+    const requestOrigin = new URL(c.req.url).origin;
+
+    if (origin && origin !== requestOrigin) {
+      return c.json({ error: 'cross-origin requests not allowed' }, 403);
+    }
+
+    const streamType = await detectHlsStreamType(targetUrl, c.req.raw.headers);
+
+    const headers = new Headers({
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+
+    if (origin) {
+      headers.set('Access-Control-Allow-Origin', origin);
+      headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      headers.set('Access-Control-Allow-Headers', '*');
+    }
+
+    return new Response(JSON.stringify({ streamType }), { headers });
+  } catch (error) {
+    console.error('Stream type detect error:', error);
+    return c.json({ streamType: 'unknown' satisfies StreamType }, 200);
+  }
+});
+
 // Proxy with optimized caching for HLS
 app.all('/server/*', async (c) => {
   const SERVER_HOST = (c.env as Env).SERVER_HOST;
@@ -35,7 +199,7 @@ app.all('/server/*', async (c) => {
   const path = c.req.path.replace('/server', '');
 
   // Prevent path traversal attacks
-  if (path.includes('..') || path.includes('//') || path.includes('\\')) {
+  if (!isValidPath(path)) {
     return c.json({ error: 'Invalid path' }, 400);
   }
 
@@ -50,11 +214,18 @@ app.all('/server/*', async (c) => {
   }
 
   // Validate SERVER_HOST format (prevent SSRF)
-  if (
-    !/^[\w\d.-]+:\d+$/.test(SERVER_HOST) &&
-    !/^[\w\d.-]+$/.test(SERVER_HOST)
-  ) {
+  if (!isValidServerHost(SERVER_HOST)) {
     return c.json({ error: 'invalid server configuration' }, 500);
+  }
+
+  // Reject literal IP addresses to avoid Cloudflare "Direct IP access not allowed" (Error 1003)
+  if (isIpHost(SERVER_HOST)) {
+    return c.json(
+      {
+        error: 'server host must be a DNS hostname (not a literal IP address)',
+      },
+      400,
+    );
   }
 
   const targetUrl = `http://${SERVER_HOST}${path}`;
@@ -71,13 +242,8 @@ app.all('/server/*', async (c) => {
       return c.json({ error: 'cross-origin requests not allowed' }, 403);
     }
 
-    // Copy original request headers and remove sensitive ones
-    const headers = new Headers(c.req.raw.headers);
-    headers.delete('host');
-    headers.delete('cookie');
-    headers.delete('authorization');
-    headers.delete('x-forwarded-for');
-    headers.delete('x-real-ip');
+    // Copy original request headers and prepare safe headers for the upstream
+    const headers = buildUpstreamHeaders(c.req.raw.headers, fullTargetUrl);
 
     // Get cache configuration for HLS
     const cacheConfig = CacheService.getHLSCacheConfig(path);
@@ -91,21 +257,6 @@ app.all('/server/*', async (c) => {
       cacheConfig,
       executionCtx: c.executionCtx,
     });
-
-    // Validate content-type for HLS files
-    const contentType = response.headers.get('content-type');
-    const isValidContentType =
-      !contentType ||
-      contentType.includes('application/vnd.apple.mpegurl') ||
-      contentType.includes('application/x-mpegURL') ||
-      contentType.includes('video/mp2t') ||
-      contentType.includes('audio/aac') ||
-      contentType.includes('video/mp4') ||
-      contentType.includes('application/octet-stream');
-
-    if (!isValidContentType) {
-      console.warn('Unexpected content-type:', contentType);
-    }
 
     // Prepare response headers
     const responseHeaders = new Headers(response.headers);

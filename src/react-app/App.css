@@ -43,3 +43,39 @@
 .read-the-docs {
   color: #888;
 }
+
+.player-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.player-shell {
+  --plyr-color-main: #ac00fb;
+}
+
+.player-shell .plyr .plyr__control.plyr__control--overlaid {
+  z-index: 10;
+}
+
+.player-loader__spinner {
+  width: 65px;
+  height: 65px;
+  border: 4px solid color-mix(in srgb, var(--plyr-color-main, #fff) 30%, transparent);
+  border-top-color: var(--plyr-color-main, #fff);
+  border-radius: 50%;
+  animation: player-loader-spin 900ms linear infinite;
+}
+
+@keyframes player-loader-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
