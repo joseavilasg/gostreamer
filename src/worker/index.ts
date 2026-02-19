@@ -258,6 +258,24 @@ app.all('/server/*', async (c) => {
       executionCtx: c.executionCtx,
     });
 
+    if (response.status >= 500) {
+      const errorHeaders = new Headers({
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+
+      if (origin) {
+        errorHeaders.set('Access-Control-Allow-Origin', origin);
+        errorHeaders.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        errorHeaders.set('Access-Control-Allow-Headers', '*');
+      }
+
+      return new Response(JSON.stringify({ error: 'upstream unavailable' }), {
+        status: 502,
+        headers: errorHeaders,
+      });
+    }
+
     // Prepare response headers
     const responseHeaders = new Headers(response.headers);
 
