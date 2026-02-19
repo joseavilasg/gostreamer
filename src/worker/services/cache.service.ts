@@ -115,9 +115,8 @@ export class CacheService {
     });
 
     if (!response.ok) {
-      return new Response(response.body, {
+      return new Response(null, {
         status: response.status,
-        statusText: response.statusText,
       });
     }
 
