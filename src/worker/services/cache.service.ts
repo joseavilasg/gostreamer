@@ -151,7 +151,7 @@ export class CacheService {
   public static getHLSCacheConfig(path: string): CacheConfig {
     const isM3U8 = path.endsWith('.m3u8');
     const isSegment =
-      path.endsWith('.ts') || path.endsWith('.aac') || path.endsWith('.mp4');
+      path.endsWith('.ts') || path.endsWith('.aac') || path.endsWith('.mp4') || path.endsWith('.m4s');
 
     if (isM3U8) {
       // Playlists: short cache (updated frequently)

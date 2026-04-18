@@ -204,7 +204,7 @@ app.all('/server/*', async (c) => {
   }
 
   // Validate HLS file extensions only
-  const allowedExtensions = ['.m3u8', '.ts', '.aac', '.mp4'];
+  const allowedExtensions = ['.m3u8', '.ts', '.aac', '.mp4', '.m4s'];
   const hasValidExtension = allowedExtensions.some((ext) =>
     path.toLowerCase().endsWith(ext),
   );
